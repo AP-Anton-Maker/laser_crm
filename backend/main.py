@@ -8,6 +8,7 @@ from .db.session import init_db, close_db
 from .api.orders import router as orders_router
 from .api.orders import action_router as order_actions_router
 from .api.chat import router as chat_router
+from .api.inventory import router as inventory_router
 
 # Импорт бота
 from .services.vk_bot import bot
@@ -74,7 +75,7 @@ app.add_middleware(
 app.include_router(orders_router)
 app.include_router(order_actions_router)
 app.include_router(chat_router)  # <--- Добавили роутер чата
-
+app.include_router(inventory_router)  # <-- Добавлена эта строка
 
 @app.get("/")
 async def root():
