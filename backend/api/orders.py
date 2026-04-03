@@ -8,7 +8,7 @@ from typing import List, Optional
 
 # Импорты моделей и схем
 from ..db.session import get_db
-from ..db.models import Order, Client
+from ..db.models import Order, Client, CashbackHistory
 from ..schemas.order import OrderCreate, OrderStatusUpdate, OrderResponse
 from ..services.calculator import SmartCalculator
 
@@ -58,11 +58,26 @@ async def get_orders(
     return response_list
 
 
-@action_router.post("/create", response_model=OrderResponse, status_code=201)
-async def create_order(
-    order_data: OrderCreate,
+@action_router.post("/status", response_model=OrderResponse)
+async def update_order_status(
+    status_data: OrderStatusUpdate,
     db: AsyncSession = Depends(get_db)
 ):
+    """
+    Обновление статуса заказа с автоматическим начислением кэшбэка и обновлением статистики клиента,
+    если заказ переводится в статус 'DONE'.
+    """
+    # 1. Находим заказ
+    order = await db.get(Order, status_data.order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+
+    old_status = order.status
+    new_status = status_data.status.upper()
+    
+    # 2. Обновляем статус
+    order.status = new_status
+    order.updated_at = datetime.utcnow()
     """
     Создание нового заказа с серверной проверкой цены.
     """
@@ -105,6 +120,8 @@ async def create_order(
         status=order_data.status.upper(),
         planned_date=order_data.planned_date
     )
+
+    
 
     db.add(new_order)
     await db.commit()
