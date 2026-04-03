@@ -176,6 +176,20 @@ class AuditLog(Base):
     details = Column(Text, nullable=True)  # Дополнительные детали (JSON)
     ip_address = Column(String(45), nullable=True)  # IP адрес
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+class ChatMessage(Base):
+    """
+    Модель сообщений чата с клиентами ВКонтакте
+    """
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    vk_id = Column(Integer, index=True, nullable=False)  # ID пользователя ВК
+    is_admin = Column(Boolean, default=False, nullable=False)  # False = клиент, True = админ/менеджер
+    message_text = Column(Text, nullable=False)  # Текст сообщения
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)  # Время отправки
+    
+    # Связи можно добавить позже, если нужно связывать с Client по vk_id
     
     # Связи
     user = relationship("User", back_populates="audit_logs")
