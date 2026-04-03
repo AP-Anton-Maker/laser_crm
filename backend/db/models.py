@@ -40,60 +40,58 @@ class User(Base):
 
 class Client(Base):
     """
-    Модель клиента.
-    Сегменты: new, regular, loyal, vip (Требование 5.4)
+    Модель клиента с поддержкой LTV и кэшбэка
     """
     __tablename__ = "clients"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False)
-    vk_id = Column(String(50), unique=True, index=True, nullable=True)  # ID ВКонтакте
-    phone = Column(String(20), nullable=True)
-    segment = Column(String(20), default="new")  # new, regular, loyal, vip
-    total_spent = Column(Float, default=0.0)  # Общая сумма покупок (LTV)
-    cashback_balance = Column(Float, default=0.0)  # Баланс кэшбек-баллов
-    cashback_earned = Column(Float, default=0.0)  # Всего заработано кэшбека
-    total_orders = Column(Integer, default=0)  # Количество заказов
+    vk_id = Column(String(50), index=True)  # ID в VK (может быть строкой или числом)
+    phone = Column(String(20))
+    
+    # Сегментация и статистика
+    customer_segment = Column(String(20), default="new")  # new, regular, loyal, vip
+    total_orders = Column(Integer, default=0)
+    total_spent = Column(Float, default=0.0)  # LTV (Life Time Value)
+    cashback_balance = Column(Float, default=0.0)  # Доступные баллы
+    cashback_earned_total = Column(Float, default=0.0)  # Всего заработано за все время
+    
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
     # Связи
     orders = relationship("Order", back_populates="client", cascade="all, delete-orphan")
     cashback_history = relationship("CashbackHistory", back_populates="client", cascade="all, delete-orphan")
-    
-    def __repr__(self):
-        return f"<Client(id={self.id}, name='{self.name}', vk_id='{self.vk_id}')>"
-
 
 class Order(Base):
     """
-    Модель заказа.
-    Flat-архитектура: параметры хранятся как текст (Требование 3.3)
-    Статусы: NEW, PROCESSING, DONE, DELIVERED (Требование 3.1)
+    Обновленная модель заказа (добавлена связь с cashback_history)
     """
     __tablename__ = "orders"
-    
+
     id = Column(Integer, primary_key=True, index=True)
-    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True)  # Может быть null для анонимных
-    service_name = Column(String(100), nullable=False)  # Название услуги
-    parameters = Column(Text, nullable=False)  # Параметры заказа в текстовом виде (JSON или ключ=значение)
-    total_price = Column(Float, nullable=False)  # Итоговая цена
-    discount = Column(Float, default=0.0)  # Скидка в процентах
-    cashback_applied = Column(Float, default=0.0)  # Использовано кэшбек-баллов
-    status = Column(String(20), default="NEW")  # NEW, PROCESSING, DONE, DELIVERED
-    planned_date = Column(DateTime, nullable=True)  # Плановая дата готовности (Требование 3.13)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    service_name = Column(String(100), nullable=False)
+    parameters = Column(Text)  # JSON строка
+    total_price = Column(Float, nullable=False)
+    discount = Column(Float, default=0.0)
+    cashback_applied = Column(Float, default=0.0)
+    
+    status = Column(String(20), default="NEW")  # NEW, PROCESSING, DONE, CANCELLED
+    planned_date = Column(DateTime, nullable=True)
+    comments = Column(Text, nullable=True)
+    
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    completed_at = Column(DateTime, nullable=True)  # Дата завершения
-    manager_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Ответственный менеджер
-    comments = Column(Text, nullable=True)  # Внутренние комментарии (Требование 3.11)
-    
+
     # Связи
     client = relationship("Client", back_populates="orders")
-    manager = relationship("User", back_populates="orders")
-    
-    def __repr__(self):
-        return f"<Order(id={self.id}, service='{self.service_name}', status='{self.status}')>"
+    user = relationship("User", back_populates="orders", foreign_keys=[user_id])
+    cashback_history = relationship("CashbackHistory", back_populates="order", cascade="all, delete-orphan")
+
+# ... остальные модели (User, Inventory, PromoCode, ChatMessage, AuditLog) остаются без изменений ...
 
 
 class Inventory(Base):
@@ -141,25 +139,23 @@ class PromoCode(Base):
 
 class CashbackHistory(Base):
     """
-    История операций кэшбека.
-    Для отслеживания начислений и списаний (Требование 5.3)
+    История операций кэшбэка (начисления и списания)
     """
     __tablename__ = "cashback_history"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     client_id = Column(Integer, ForeignKey("clients.id"), nullable=False)
-    operation_type = Column(String(20), nullable=False)  # earned (начислено), spent (списано)
-    amount = Column(Float, nullable=False)  # Сумма операции
-    order_id = Column(Integer, ForeignKey("orders.id"), nullable=True)  # Связанный заказ
-    description = Column(String(255), nullable=True)  # Описание операции
-    created_at = Column(DateTime, default=datetime.utcnow)
+    order_id = Column(Integer, ForeignKey("orders.id"), nullable=True)  # Связь с заказом (если начисление за заказ)
     
+    operation_type = Column(String(20), nullable=False)  # 'earned' (начислено), 'spent' (списано), 'refunded' (возврат)
+    amount = Column(Float, nullable=False)  # Сумма операции (всегда положительная, тип операции указывает направление)
+    description = Column(Text, nullable=True)  # Комментарий (например, "За заказ #123")
+    
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
     # Связи
     client = relationship("Client", back_populates="cashback_history")
-    
-    def __repr__(self):
-        return f"<CashbackHistory(client_id={self.client_id}, type='{self.operation_type}', amount={self.amount})>"
-
+    order = relationship("Order", back_populates="cashback_history")
 
 class AuditLog(Base):
     """
