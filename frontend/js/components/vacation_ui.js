@@ -1,15 +1,15 @@
-import { getSettings, updateSettings } from '../api/system.js';
+import { getSystemSettings, updateSystemSettings } from '../api/api_client.js';
 import { showToast } from '../utils/toast.js';
 
 /**
- * Проверка режима отпуска и отображение предупреждения на дашборде
+ * Проверка режима отпуска и отображение алерта
  */
 export async function checkVacationMode() {
     const alertBox = document.getElementById("vacation-alert-box");
     if (!alertBox) return;
 
     try {
-        const settings = await getSettings();
+        const settings = await getSystemSettings();
         
         if (settings.is_vacation_mode) {
             alertBox.style.display = 'block';
@@ -22,13 +22,12 @@ export async function checkVacationMode() {
             alertBox.style.display = 'none';
         }
     } catch (error) {
-        console.error("Не удалось проверить режим отпуска", error);
+        console.error("Ошибка проверки режима отпуска", error);
     }
 }
 
 /**
- * Рендеринг формы настроек отпуска (для модального окна или секции настроек)
- * @param {string} containerId - ID элемента, куда рендерить форму
+ * Рендеринг формы настроек отпуска
  */
 export function renderVacationSettings(containerId) {
     const container = document.getElementById(containerId);
@@ -37,13 +36,13 @@ export function renderVacationSettings(containerId) {
     container.innerHTML = `
         <div class="card">
             <h3>🌴 Режим отпуска</h3>
-            <p class="text-sm text-gray-500 mb-4">Включите этот режим, чтобы VK-бот автоматически отвечал клиентам.</p>
+            <p class="text-muted mb-4">Включите этот режим, чтобы VK-бот автоматически отвечал клиентам.</p>
             
             <form id="vacation-form">
                 <div class="form-group">
-                    <label class="flex items-center space-x-3 cursor-pointer">
-                        <input type="checkbox" id="vacation-toggle" class="w-5 h-5 text-blue-600 rounded">
-                        <span class="font-medium text-lg">Я в отпуске</span>
+                    <label class="flex items-center space-x-3" style="display:flex; align-items:center; gap:10px; cursor:pointer;">
+                        <input type="checkbox" id="vacation-toggle" style="width:auto;">
+                        <span style="font-weight:600; font-size:1.1rem;">Я в отпуске</span>
                     </label>
                 </div>
 
@@ -54,7 +53,7 @@ export function renderVacationSettings(containerId) {
 
                 <div class="form-group">
                     <label for="vacation-msg">Текст автоответа</label>
-                    <textarea id="vacation-msg" rows="4" placeholder="Сообщение, которое увидят клиенты в ВК..."></textarea>
+                    <textarea id="vacation-msg" rows="4" placeholder="Сообщение для клиентов..."></textarea>
                 </div>
 
                 <button type="submit" class="btn btn-primary">Сохранить настройки</button>
@@ -62,16 +61,13 @@ export function renderVacationSettings(containerId) {
         </div>
     `;
 
-    // Загрузка текущих значений
     loadSettingsIntoForm();
-
-    // Обработчик сохранения
     document.getElementById('vacation-form').addEventListener('submit', handleSaveSettings);
 }
 
 async function loadSettingsIntoForm() {
     try {
-        const settings = await getSettings();
+        const settings = await getSystemSettings();
         
         const toggle = document.getElementById('vacation-toggle');
         const dateInput = document.getElementById('vacation-date');
@@ -96,9 +92,9 @@ async function handleSaveSettings(e) {
     };
 
     try {
-        await updateSettings(data);
-        showToast("Настройки отпуска сохранены!", "success");
-        checkVacationMode(); // Обновить плашку на дашборде
+        await updateSystemSettings(data);
+        showToast("Настройки сохранены!", "success");
+        checkVacationMode();
     } catch (err) {
         showToast(err.message, "error");
     }
