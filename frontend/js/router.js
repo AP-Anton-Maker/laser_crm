@@ -1,10 +1,10 @@
-/**
- * Простой роутер для переключения вкладок без перезагрузки страницы.
- * Управляет классами .active у кнопок меню и секций контента.
- */
+import { renderOrdersTable } from './components/orders_ui.js';
+// Можно импортировать другие рендеры, если они вынесены в отдельные файлы
+
 export function initRouter() {
     const tabs = document.querySelectorAll(".tab");
     const sections = document.querySelectorAll(".content-section");
+    const pageTitle = document.getElementById("page-title");
 
     tabs.forEach(tab => {
         tab.addEventListener("click", (e) => {
@@ -13,25 +13,43 @@ export function initRouter() {
             const targetId = tab.getAttribute("data-tab");
             if (!targetId) return;
 
-            // Снимаем активный класс со всех вкладок и секций
+            // Переключение классов
             tabs.forEach(t => t.classList.remove("active"));
             sections.forEach(s => s.classList.remove("active"));
 
-            // Добавляем активный класс текущей вкладке
             tab.classList.add("active");
             
-            // Показываем нужную секцию
             const targetSection = document.getElementById(targetId);
             if (targetSection) {
                 targetSection.classList.add("active");
                 
-                // Специфичная логика: если открыли вкладку заказов - обновляем таблицу
-                if (targetId === "orders-section" && typeof window.renderOrdersTable === 'function') {
-                    window.renderOrdersTable();
+                // Обновление заголовка
+                pageTitle.textContent = tab.textContent.trim().split('\n')[1] || tab.textContent.trim();
+
+                // Логика подгрузки данных при переключении
+                if (targetId === "orders-section") {
+                    if (typeof window.renderOrdersTable === 'function') {
+                        window.renderOrdersTable();
+                    }
                 }
-                
-                // Если есть другие динамические компоненты (склад, клиенты), можно добавить аналогично
+                // Здесь можно добавить логику для других вкладок (clients, inventory и т.д.)
+            }
+
+            // На мобильных закрывать меню после клика
+            const sidebar = document.querySelector('.sidebar');
+            if (window.innerWidth <= 768) {
+                sidebar.classList.remove('open');
             }
         });
     });
+
+    // Мобильное меню
+    const menuBtn = document.getElementById('mobile-menu-toggle');
+    const sidebar = document.querySelector('.sidebar');
+    
+    if (menuBtn && sidebar) {
+        menuBtn.addEventListener('click', () => {
+            sidebar.classList.toggle('open');
+        });
+    }
 }
