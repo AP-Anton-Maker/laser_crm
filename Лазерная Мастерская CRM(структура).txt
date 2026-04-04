@@ -12,7 +12,7 @@ laser_crm_project/
 │   ├── 📁 nginx/
 │   │   └── ⚙️ default.conf         # Настройки проксирования и статики
 │   └── 📁 ssl/                     # (Треб. 1.6) HTTPS/TLS
-│       ├── 🔑 cert.pem             # SSL сертификат
+│       ├── 🔑 cert.pem             # SSL сертификат 
 │       └── 🔑 key.pem              # Приватный ключ
 │
 ├── 📁 data/                        # 🗄️ ХРАНИЛИЩЕ (Синхронизируется с Docker Volume)
