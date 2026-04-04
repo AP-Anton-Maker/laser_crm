@@ -10,6 +10,7 @@ from .api.chat import router as chat_router
 from .api.inventory import router as inventory_router
 from .api.clients import router as clients_router
 from .api.analytics import router as analytics_router
+from .api.system import router as system_router
 
 # Импорт бота
 from .services.vk_bot import bot
@@ -79,6 +80,7 @@ app.include_router(chat_router)  # <--- Роутер ВК чат
 app.include_router(inventory_router)  # <-- Роутер инвентарь
 app.include_router(clients_router)  # <-- Роутер клиенты
 app.include_router(analytics_router)  # <-- Роутер аналитика
+app.include_router(system_router)  # <-- Роутер Бекап
 
 @app.get("/")
 async def root():
