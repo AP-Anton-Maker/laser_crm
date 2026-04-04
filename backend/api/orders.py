@@ -1,14 +1,13 @@
+# Импорты моделей и схем
+import json
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
-import json
-from datetime import datetime
 from typing import List, Optional
-
-# Импорты моделей и схем
 from ..db.session import get_db
 from ..db.models import Order, Client, CashbackHistory
+from datetime import datetime
 from ..schemas.order import OrderCreate, OrderStatusUpdate, OrderResponse
 from ..services.calculator import SmartCalculator
 
@@ -60,7 +59,7 @@ async def get_orders(
 
 @action_router.post("/status", response_model=OrderResponse)
 async def update_order_status(
-    status_data: OrderStatusUpdate,
+    status_ OrderStatusUpdate,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -78,64 +77,52 @@ async def update_order_status(
     # 2. Обновляем статус
     order.status = new_status
     order.updated_at = datetime.utcnow()
-    """
-    Создание нового заказа с серверной проверкой цены.
-    """
-    # 1. Проверка существования клиента
-    client_check = await db.get(Client, order_data.client_id)
-    if not client_check:
-        raise HTTPException(status_code=404, detail="Клиент не найден")
 
-    # 2. СЕРВЕРНЫЙ РАСЧЕТ ЦЕНЫ
-    try:
-        calculated_price = SmartCalculator.calculate(
-            calc_type=order_data.calc_type,
-            base_price=order_data.server_base_price,
-            params=order_data.parameters
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ошибка калькулятора: {str(e)}")
+    # 3. БИЗНЕС-ЛОГИКА: Если заказ завершен (DONE)
+    if new_status == "DONE" and old_status != "DONE":
+        client = await db.get(Client, order.client_id)
+        if client:
+            # --- Обновление статистики LTV ---
+            client.total_orders += 1
+            client.total_spent += order.total_price
+            
+            # --- Начисление кэшбэка (5%) ---
+            cashback_amount = order.total_price * 0.05
+            client.cashback_balance += cashback_amount
+            client.cashback_earned_total += cashback_amount
+            
+            # --- Запись в историю кэшбэка ---
+            history_entry = CashbackHistory(
+                client_id=client.id,
+                order_id=order.id,
+                operation_type="earned",
+                amount=cashback_amount,
+                description=f"Начислено за заказ #{order.id}"
+            )
+            db.add(history_entry)
+            
+            # --- Автоматическая сегментация ---
+            if client.total_spent > 50000:
+                client.customer_segment = "vip"
+            elif client.total_spent > 15000:
+                client.customer_segment = "loyal"
+            elif client.total_spent > 5000:
+                client.customer_segment = "regular"
+            # else остается 'new' или текущий, если меньше 5000
 
-    # 3. СРАВНЕНИЕ ЦЕН
-    # Допускаем погрешность в 2 рубля из-за различий округления на клиенте/сервере
-    if abs(calculated_price - order_data.total_price) > 2.0:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Несоответствие цены! Клиент прислал: {order_data.total_price}, "
-                   f"Сервер рассчитал: {calculated_price}. Пожалуйста, обновите страницу."
-        )
-
-    # 4. Сериализация параметров и сохранение
-    parameters_json = json.dumps(order_data.parameters, ensure_ascii=False)
-
-    new_order = Order(
-        client_id=order_data.client_id,
-        service_name=order_data.service_name,
-        parameters=parameters_json,
-        total_price=calculated_price, # Сохраняем ТОЛЬКО серверную цену!
-        discount=order_data.discount,
-        cashback_applied=order_data.cashback_applied,
-        status=order_data.status.upper(),
-        planned_date=order_data.planned_date
-    )
-
-    
-
-    db.add(new_order)
+    # Коммитим все изменения (статус заказа + данные клиента + история кэшбэка)
     await db.commit()
-    await db.refresh(new_order)
     
-    # Подготовка ответа
-    await db.refresh(new_order, attribute_names=['client'])
+    # Обновляем объект заказа для ответа
+    await db.refresh(order)
+    await db.refresh(order, attribute_names=['client'])
     
-    response_data = OrderResponse.model_validate(new_order)
-    if new_order.client:
-        response_data.client_name = new_order.client.name
-    
+    response_data = OrderResponse.model_validate(order)
+    if order.client:
+        response_data.client_name = order.client.name
+        
     try:
-        response_data.parameters = json.loads(new_order.parameters)
+        response_data.parameters = json.loads(order.parameters)
     except:
         response_data.parameters = {}
         
