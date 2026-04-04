@@ -2,6 +2,7 @@
 🎯 Цель проекта
 Создание полнофункциональной CRM-системы для лазерной мастерской с управлением заказами, клиентами, складом, интеграцией с ВКонтакте и AI-аналитикой.
 Стек: Python (FastAPI), SQLAlchemy 2.0 (Async), SQLite, Vanilla JS (ES6 Modules), VKBottle, Scikit-learn.
+
 laser_crm/
 ├── backend/
 │   ├── core/
