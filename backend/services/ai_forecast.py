@@ -1,33 +1,34 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, extract
+from sqlalchemy import select
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Tuple
 import numpy as np
 
 from ..db.models import Order
-from sklearn.linear_model import LinearRegression
+
+# Проверка наличия sklearn при импорте, чтобы избежать краша если пакет не установлен
+try:
+    from sklearn.linear_model import LinearRegression
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    SKLEARN_AVAILABLE = False
 
 
 async def predict_revenue(session: AsyncSession) -> Optional[Dict[str, Any]]:
     """
     Прогнозирует выручку на завтрашний день на основе данных за последние 30 дней.
-    Использует линейную регрессию (Linear Regression).
+    Использует линейную регрессию.
     
-    Возвращает:
-    - prediction: прогнозируемая сумма
-    - trend: 'up', 'down', 'stable'
-    - confidence: условная уверенность (R^2 или вариация)
+    :return: Словарь с прогнозом, трендом и уверенностью, либо None если мало данных.
     """
-    
-    # 1. Получаем данные: сумма total_price по дням для завершенных заказов (DONE/COMPLETED)
-    # Для SQLite используем date() функцию или работу со строками, если тип DateTime
-    # Здесь упрощенный вариант: берем все заказы со статусом DONE за 30 дней и группируем вручную в Python,
-    # так как агрегация по дате в разных СУБД отличается синтаксически.
-    
+    if not SKLEARN_AVAILABLE:
+        return {"error": "Scikit-learn not installed"}
+
+    # 1. Получаем данные о завершенных заказах за последние 30 дней
     thirty_days_ago = datetime.utcnow() - timedelta(days=30)
     
     stmt = (
-        select(Order.total_price, Order.updated_at) # updated_at лучше отражает дату завершения
+        select(Order.total_price, Order.updated_at)
         .where(Order.status.in_(["DONE", "COMPLETED"]))
         .where(Order.updated_at >= thirty_days_ago)
         .order_by(Order.updated_at.asc())
@@ -39,56 +40,60 @@ async def predict_revenue(session: AsyncSession) -> Optional[Dict[str, Any]]:
     if not rows:
         return None
 
-    # 2. Агрегируем данные по дням (день -> сумма)
-    daily_revenue = {}
+    # 2. Агрегация по дням (datetime.date -> sum_price)
+    daily_revenue: Dict[datetime.date, float] = {}
+    
     for price, date_obj in rows:
         if date_obj is None:
             continue
         day_key = date_obj.date()
-        daily_revenue[day_key] = daily_revenue.get(day_key, 0.0) + price
+        daily_revenue[day_key] = daily_revenue.get(day_key, 0.0) + float(price)
 
-    # Преобразуем в списки для sklearn
-    # X: номер дня относительно начала периода (0, 1, 2...)
-    # y: выручка в этот день
-    sorted_days = sorted(daily_revenue.keys())
-    
-    if len(sorted_days) < 3:
-        # Недостаточно данных для обучения модели
+    # Если дней с активностью меньше 3, прогноз ненадежен
+    if len(daily_revenue) < 3:
+        avg_val = sum(daily_revenue.values()) / len(daily_revenue)
         return {
-            "prediction": sum(daily_revenue.values()) / len(daily_revenue),
+            "prediction": round(avg_val, 2),
             "trend": "stable",
             "confidence": 0.0,
-            "message": "Недостаточно данных для точного прогноза (менее 3 дней)"
+            "message": "Недостаточно данных для ML-прогноза (менее 3 дней активности)"
         }
 
+    # Подготовка данных для sklearn
+    sorted_days = sorted(daily_revenue.keys())
+    
+    # X: порядковый номер дня (0, 1, 2...)
+    # y: выручка в этот день
     X = np.array([[i] for i in range(len(sorted_days))])
     y = np.array([daily_revenue[day] for day in sorted_days])
 
-    # 3. Обучаем модель
+    # 3. Обучение модели
     model = LinearRegression()
     model.fit(X, y)
     
-    # 4. Делаем прогноз на следующий день (следующий индекс X)
+    # 4. Предсказание на следующий день
     next_day_index = len(sorted_days)
     predicted_value = model.predict([[next_day_index]])[0]
     
-    # 5. Определяем тренд по коэффициенту наклона (coef_)
+    # 5. Определение тренда по коэффициенту наклона
     slope = model.coef_[0]
-    if slope > 100: # Порог значимости роста (100 руб/день)
+    
+    # Пороги значимости тренда (можно настроить)
+    if slope > 500: 
         trend = "up"
-    elif slope < -100:
+    elif slope < -500:
         trend = "down"
     else:
         trend = "stable"
         
-    # 6. Расчет уверенности (R^2 score)
+    # 6. Расчет уверенности (R^2)
     confidence = model.score(X, y)
     
-    # Ограничиваем прогноз нулем (не может быть минус выручки)
-    final_prediction = max(0.0, round(predicted_value, 2))
+    # Финальная обработка результата
+    final_prediction = max(0.0, predicted_value)
     
     return {
-        "prediction": final_prediction,
+        "prediction": round(final_prediction, 2),
         "trend": trend,
         "confidence": round(confidence, 2),
         "message": f"Прогноз на основе {len(sorted_days)} дней активности"
