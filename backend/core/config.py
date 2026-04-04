@@ -14,8 +14,14 @@ class Settings(BaseSettings):
     # Токен группы ВКонтакте
     VK_TOKEN: str = os.getenv("VK_TOKEN", "")
     
-    # Секретный ключ для сессий (опционально)
-    SECRET_KEY: str = "super_secret_key_change_me_in_prod"
+    # Секретный ключ для JWT (в продакшене менять!)
+    SECRET_KEY: str = "super-secret-key-change-me-in-prod"
+    
+    # Алгоритм шифрования JWT
+    ALGORITHM: str = "HS256"
+    
+    # Время жизни токена в минутах (3000 мин ≈ 2 дня)
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 3000
 
     class Config:
         env_file = ".env"
@@ -26,12 +32,9 @@ class Settings(BaseSettings):
         """
         Возвращает путь к БД, предварительно создав директорию, если её нет.
         """
-        # Извлекаем относительный путь из строки подключения
-        # sqlite+aiosqlite:///../data/file.db -> ../data/file.db
         path_str = self.DATABASE_URL.replace("sqlite+aiosqlite:///", "")
         db_path = Path(path_str)
         
-        # Создаем директорию
         db_dir = db_path.parent
         if not db_dir.exists():
             db_dir.mkdir(parents=True, exist_ok=True)
