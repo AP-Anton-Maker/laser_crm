@@ -9,7 +9,7 @@ laser_crm_project/
 ├── 📄 README.md                    # Описание и OpenAPI спецификации (Треб. 1.8)
 │
 ├── 📁 infra/                       # 🏗️ ИНФРАСТРУКТУРА
-│   ├── 📁 nginx/
+│   ├── 📁 nginx/ 
 │   │   └── ⚙️ default.conf         # Настройки проксирования и статики
 │   └── 📁 ssl/                     # (Треб. 1.6) HTTPS/TLS
 │       ├── 🔑 cert.pem             # SSL сертификат 
