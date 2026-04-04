@@ -1,24 +1,11 @@
 from datetime import datetime, timedelta
 from typing import Optional
-from jose import jwt # Или используйте стандартный jwt, если установлен PyJWT
+import jwt
 from passlib.context import CryptContext
-from ..core.config import settings
+from .config import settings
 
-# Настройки безопасности
-# В продакшене SECRET_KEY нужно брать из переменных окружения!
-SECRET_KEY = settings.SECRET_KEY if hasattr(settings, 'SECRET_KEY') else "super-secret-key-change-me-in-production"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 3000  # Время жизни токена (минуты)
-
-# Контекст для хеширования паролей (bcrypt)
+# Контекст для хэширования паролей (bcrypt)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """
-    Проверяет соответствие открытого пароля его хешу.
-    """
-    return pwd_context.verify(plain_password, hashed_password)
 
 
 def get_password_hash(password: str) -> str:
@@ -28,21 +15,32 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """
+    Проверяет соответствие пароля хэшу.
+    """
+    return pwd_context.verify(plain_password, hashed_password)
+
+
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """
     Создает JWT токен.
-    :param data: Данные для кодирования (обычно {"sub": username})
-    :param expires_delta: Время жизни токена
-    :return: Строка токена
+    :param data: Словарь с данными (обычно {"sub": username})
+    :param expires_delta: Время жизни токена (опционально)
+    :return: Encoded JWT string
     """
     to_encode = data.copy()
     
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-        
+        expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    
     to_encode.update({"exp": expire})
     
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    encoded_jwt = jwt.encode(
+        to_encode, 
+        settings.SECRET_KEY, 
+        algorithm=settings.ALGORITHM
+    )
     return encoded_jwt
