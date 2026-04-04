@@ -27,6 +27,7 @@ Base = declarative_base()
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
     Зависимость FastAPI для получения сессии БД.
+    Автоматически коммитит при успехе и делает rollback при ошибке.
     """
     async with async_session_maker() as session:
         try:
