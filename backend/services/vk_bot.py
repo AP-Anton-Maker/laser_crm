@@ -27,7 +27,7 @@ if VK_TOKEN:
         
         async with async_session_maker() as session:
             try:
-                # 1. Сохраняем входящее сообщение в историю
+                # 1. Сохраняем входящее сообщение
                 new_msg = ChatMessage(
                     vk_id=vk_user_id,
                     is_admin=False,
@@ -38,7 +38,7 @@ if VK_TOKEN:
                 await session.commit()
                 logger.info(f"Сообщение от VK:{vk_user_id} сохранено.")
 
-                # 2. Проверяем настройки системы (Режим отпуска)
+                # 2. Проверяем настройки (Режим отпуска)
                 stmt = select(SystemSettings).where(SystemSettings.id == 1)
                 res = await session.execute(stmt)
                 settings = res.scalars().first()
@@ -49,18 +49,16 @@ if VK_TOKEN:
                     # Режим отпуска включен
                     if settings.vacation_message:
                         response_text = settings.vacation_message
-                        # Добавляем дату, если она есть
                         if settings.vacation_end_date:
                             response_text += f"\n📅 Ожидаемое возвращение: {settings.vacation_end_date}"
                     else:
                         response_text = "Я сейчас в отпуске. Отвечу, как вернусь!"
-                    
                     logger.info(f"Отправлен автоответ об отпуске пользователю {vk_user_id}")
                 else:
                     # Стандартный режим
                     response_text = "Ваше сообщение принято! 🛠\nМастер скоро ответит вам в этом чате."
 
-                # 3. Отправляем ответ клиенту
+                # 3. Отправляем ответ
                 if response_text:
                     await message.answer(response_text)
                 
