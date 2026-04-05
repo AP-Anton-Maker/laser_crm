@@ -14,6 +14,8 @@ from .api.analytics import router as analytics_router
 from .api.system import router as system_router
 from .services.vk_bot import bot
 from api.calculator import router as calculator_router
+from api.forecast import router as forecast_router
+from api.backup import router as backup_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("main")
@@ -77,6 +79,8 @@ app.include_router(chat_router)
 app.include_router(analytics_router)
 app.include_router(system_router)
 app.include_router(calculator_router)
+app.include_router(forecast_router)
+app.include_router(backup_router)
 
 @app.get("/")
 async def root():
