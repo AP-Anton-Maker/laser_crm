@@ -1,46 +1,34 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 import jwt
 from passlib.context import CryptContext
-from .config import settings
+from core.config import settings
 
-# Контекст для хэширования паролей (bcrypt)
+# Настройка алгоритма хеширования паролей
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-
-def get_password_hash(password: str) -> str:
-    """
-    Генерирует хеш пароля используя bcrypt.
-    """
-    return pwd_context.hash(password)
-
-
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """
-    Проверяет соответствие пароля хэшу.
-    """
+    """Проверка совпадения пароля и хеша."""
     return pwd_context.verify(plain_password, hashed_password)
 
+def get_password_hash(password: str) -> str:
+    """Создание хеша из пароля."""
+    return pwd_context.hash(password)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-    """
-    Создает JWT токен.
-    :param data: Словарь с данными (обычно {"sub": username})
-    :param expires_delta: Время жизни токена (опционально)
-    :return: Encoded JWT string
-    """
+    """Генерация JWT токена для авторизации."""
     to_encode = data.copy()
     
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    
+        expire = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
+        
     to_encode.update({"exp": expire})
     
     encoded_jwt = jwt.encode(
         to_encode, 
-        settings.SECRET_KEY, 
-        algorithm=settings.ALGORITHM
+        settings.secret_key, 
+        algorithm=settings.algorithm
     )
     return encoded_jwt
