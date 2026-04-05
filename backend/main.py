@@ -13,6 +13,7 @@ from .api.chat import router as chat_router
 from .api.analytics import router as analytics_router
 from .api.system import router as system_router
 from .services.vk_bot import bot
+from api.calculator import router as calculator_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("main")
@@ -75,6 +76,7 @@ app.include_router(inventory_router)
 app.include_router(chat_router)
 app.include_router(analytics_router)
 app.include_router(system_router)
+app.include_router(calculator_router)
 
 @app.get("/")
 async def root():
