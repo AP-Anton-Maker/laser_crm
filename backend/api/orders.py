@@ -1,133 +1,114 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
-import json
-from datetime import datetime
 from typing import List, Optional
 
-from ..db.session import get_db
-from ..db.models import Order, Client, CashbackHistory
-from ..schemas.all_schemas import OrderCreate, OrderStatusUpdate, OrderResponse
-from ..services.calculator import SmartCalculator
+from db.session import get_db
+from db.models import Order, Client, User
+from schemas import OrderCreate, OrderUpdate, OrderResponse
+from api.deps import get_current_active_user
 
-router = APIRouter(prefix="/api/orders", tags=["Orders"])
-action_router = APIRouter(prefix="/api/order", tags=["Order Actions"])
+# Основной роутер для CRUD операций с заказами
+router = APIRouter(prefix="/api/orders", tags=["Заказы"])
 
+# Дополнительный роутер для специфичных действий (например, быстрая смена статуса)
+action_router = APIRouter(prefix="/api/orders/{order_id}/action", tags=["Действия с заказами"])
+
+@router.post("/", response_model=OrderResponse)
+async def create_order(
+    order_in: OrderCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Создание нового заказа для существующего клиента."""
+    result = await db.execute(select(Client).where(Client.id == order_in.client_id))
+    client = result.scalars().first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Указанный клиент не найден")
+        
+    new_order = Order(**order_in.model_dump())
+    db.add(new_order)
+    await db.commit()
+    await db.refresh(new_order)
+    return new_order
 
 @router.get("/", response_model=List[OrderResponse])
 async def get_orders(
-    status_filter: Optional[str] = Query(None, alias="status"),
-    db: AsyncSession = Depends(get_db)
+    status: Optional[str] = Query(None, description="Фильтр по статусу заказа"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
-    stmt = select(Order).options(selectinload(Order.client))
-    if status_filter:
-        stmt = stmt.where(Order.status == status_filter.upper())
-    stmt = stmt.order_by(Order.created_at.desc())
-    
-    result = await db.execute(stmt)
-    orders = result.scalars().all()
-    
-    response_list = []
-    for order in orders:
-        data = OrderResponse.model_validate(order)
-        if order.client:
-            data.client_name = order.client.name
-        try:
-            if order.parameters:
-                data.parameters = json.loads(order.parameters)
-        except:
-            data.parameters = {}
-        response_list.append(data)
-    return response_list
+    """Получение списка заказов (с возможностью фильтрации по статусу)."""
+    query = select(Order)
+    if status:
+        query = query.where(Order.status == status)
+        
+    result = await db.execute(query)
+    return result.scalars().all()
 
-
-@action_router.post("/create", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)
-async def create_order(order_data: OrderCreate, db: AsyncSession = Depends(get_db)):
-    client = await db.get(Client, order_data.client_id)
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
-
-    # Расчет цены на сервере (для проверки, но сохраняем переданную, если разница не критична)
-    # В реальном проекте здесь должна быть строгая валидация
-    calculated_price = SmartCalculator.calculate(
-        calc_type=order_data.service_name,
-        base_price=100.0, # Заглушка, в реальности брать из справочника
-        params=order_data.parameters
-    )
-
-    parameters_json = json.dumps(order_data.parameters, ensure_ascii=False)
-
-    new_order = Order(
-        client_id=order_data.client_id,
-        service_name=order_data.service_name,
-        parameters=parameters_json,
-        total_price=order_data.total_price,
-        discount=order_data.discount,
-        cashback_applied=order_data.cashback_applied,
-        status=order_data.status.upper(),
-        planned_date=order_data.planned_date
-    )
-
-    db.add(new_order)
-    await db.commit()
-    await db.refresh(new_order, attribute_names=['client'])
-    
-    resp = OrderResponse.model_validate(new_order)
-    if new_order.client:
-        resp.client_name = new_order.client.name
-    try:
-        resp.parameters = json.loads(new_order.parameters)
-    except:
-        resp.parameters = {}
-    return resp
-
-
-@action_router.post("/status", response_model=OrderResponse)
-async def update_order_status(status_data: OrderStatusUpdate, db: AsyncSession = Depends(get_db)):
-    order = await db.get(Order, status_data.order_id)
+@router.get("/{order_id}", response_model=OrderResponse)
+async def get_order(
+    order_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Получение карточки конкретного заказа."""
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalars().first()
     if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+    return order
 
-    old_status = order.status
-    new_status = status_data.status.upper()
-    
-    order.status = new_status
-    order.updated_at = datetime.utcnow()
-
-    # Логика начисления кэшбэка при завершении
-    if new_status in ["DONE", "COMPLETED"] and old_status not in ["DONE", "COMPLETED"]:
-        client = await db.get(Client, order.client_id)
-        if client:
-            client.total_orders += 1
-            client.total_spent += order.total_price
-            
-            cashback_amount = order.total_price * 0.05
-            client.cashback_balance += cashback_amount
-            
-            # Сегментация
-            if client.total_spent > 50000: client.segment = "vip"
-            elif client.total_spent > 15000: client.segment = "loyal"
-            elif client.total_spent > 5000: client.segment = "regular"
-            else: client.segment = "new"
-            
-            history_entry = CashbackHistory(
-                client_id=client.id,
-                order_id=order.id,
-                operation_type="earned",
-                amount=cashback_amount,
-                description=f"Кэшбэк за заказ #{order.id}"
-            )
-            db.add(history_entry)
-
+@router.put("/{order_id}", response_model=OrderResponse)
+async def update_order(
+    order_id: int,
+    order_update: OrderUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Обновление данных заказа (описание, цена, дедлайн)."""
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalars().first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+        
+    update_data = order_update.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(order, key, value)
+        
     await db.commit()
-    await db.refresh(order, attribute_names=['client'])
-    
-    resp = OrderResponse.model_validate(order)
-    if order.client:
-        resp.client_name = order.client.name
-    try:
-        resp.parameters = json.loads(order.parameters)
-    except:
-        resp.parameters = {}
-    return resp
+    await db.refresh(order)
+    return order
+
+@router.delete("/{order_id}")
+async def delete_order(
+    order_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Удаление заказа."""
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalars().first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+        
+    await db.delete(order)
+    await db.commit()
+    return {"message": "Заказ успешно удален"}
+
+@action_router.post("/status")
+async def change_order_status(
+    order_id: int,
+    new_status: str = Query(..., description="Новый статус заказа"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Быстрое изменение статуса заказа через отдельный action-эндпоинт."""
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalars().first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+        
+    order.status = new_status
+    await db.commit()
+    return {"message": f"Статус заказа изменен на {new_status}"}
