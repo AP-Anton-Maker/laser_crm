@@ -1,69 +1,47 @@
-import os
 import logging
-from typing import Optional
 from vkbottle import Bot
-from vkbottle.tools import Message
+from vkbottle.bot import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from datetime import datetime
 
-from ..db.models import ChatMessage, SystemSettings
-from ..db.session import async_session_maker
+from core.config import settings
+from db.session import async_session_maker
+from db.models import Client, ChatMessage
 
 logger = logging.getLogger("vk_bot")
-VK_TOKEN = os.getenv("VK_TOKEN", "")
 
-bot: Optional[Bot] = None
+# Инициализируем бота только если в конфиге есть токен
+bot = Bot(token=settings.vk_token) if settings.vk_token else None
 
-if VK_TOKEN:
-    bot = Bot(token=VK_TOKEN)
-
+if bot:
     @bot.on.message()
-    async def handle_message(message: Message):
-        if not message.text:
-            return
-
-        vk_user_id = message.from_id
-        
+    async def message_handler(message: Message):
+        """Обработка всех входящих сообщений из ВК."""
         async with async_session_maker() as session:
-            try:
-                # 1. Сохраняем входящее сообщение
-                new_msg = ChatMessage(
-                    vk_id=vk_user_id,
-                    is_admin=False,
-                    message_text=message.text,
-                    timestamp=datetime.utcnow()
-                )
-                session.add(new_msg)
-                await session.commit()
-                logger.info(f"Сообщение от VK:{vk_user_id} сохранено.")
-
-                # 2. Проверяем настройки (Режим отпуска)
-                stmt = select(SystemSettings).where(SystemSettings.id == 1)
-                res = await session.execute(stmt)
-                settings = res.scalars().first()
-
-                response_text = ""
-
-                if settings and settings.is_vacation_mode:
-                    # Режим отпуска включен
-                    if settings.vacation_message:
-                        response_text = settings.vacation_message
-                        if settings.vacation_end_date:
-                            response_text += f"\n📅 Ожидаемое возвращение: {settings.vacation_end_date}"
-                    else:
-                        response_text = "Я сейчас в отпуске. Отвечу, как вернусь!"
-                    logger.info(f"Отправлен автоответ об отпуске пользователю {vk_user_id}")
-                else:
-                    # Стандартный режим
-                    response_text = "Ваше сообщение принято! 🛠\nМастер скоро ответит вам в этом чате."
-
-                # 3. Отправляем ответ
-                if response_text:
-                    await message.answer(response_text)
+            # 1. Ищем клиента в базе по его VK ID
+            result = await session.execute(select(Client).where(Client.vk_id == str(message.from_id)))
+            client = result.scalars().first()
+            
+            # 2. Если клиента нет, создаем его автоматически
+            if not client:
+                try:
+                    # Запрашиваем имя и фамилию у API ВК
+                    users_info = await bot.api.users.get(user_ids=[message.from_id])
+                    user_name = f"{users_info[0].first_name} {users_info[0].last_name}" if users_info else f"VK Пользователь {message.from_id}"
+                except Exception:
+                    user_name = f"VK Пользователь {message.from_id}"
                 
-            except Exception as e:
-                await session.rollback()
-                logger.error(f"Ошибка БД в боте: {e}", exc_info=True)
-else:
-    logger.warning("VK_TOKEN не найден. Бот не активирован.")
+                client = Client(name=user_name, vk_id=str(message.from_id))
+                session.add(client)
+                await session.flush() # Получаем ID клиента до коммита
+            
+            # 3. Сохраняем сообщение в базу
+            new_msg = ChatMessage(
+                client_id=client.id,
+                direction="in",
+                text=message.text,
+                is_read=False
+            )
+            session.add(new_msg)
+            await session.commit()
+            logger.info(f"Получено и сохранено сообщение от VK ID: {message.from_id}")
