@@ -103,12 +103,31 @@ async def change_order_status(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Быстрое изменение статуса заказа через отдельный action-эндпоинт."""
+    """Быстрое изменение статуса заказа с начислением кэшбэка при завершении."""
     result = await db.execute(select(Order).where(Order.id == order_id))
     order = result.scalars().first()
     if not order:
         raise HTTPException(status_code=404, detail="Заказ не найден")
         
+    old_status = order.status
     order.status = new_status
+    
+    # СИСТЕМА ЛОЯЛЬНОСТИ: Если заказ перешел в статус "Выдан", начисляем 5% кэшбэка клиенту
+    if new_status == "delivered" and old_status != "delivered":
+        client_res = await db.execute(select(Client).where(Client.id == order.client_id))
+        client = client_res.scalars().first()
+        
+        if client:
+            cashback_amount = order.price * 0.05
+            
+            # Если у клиента в базе notes пустое, делаем его строкой
+            if not client.notes:
+                client.notes = f"Баланс кэшбэка: {cashback_amount} руб."
+            elif "Баланс кэшбэка:" in client.notes:
+                # Обновляем старую сумму (упрощенная логика для старта)
+                client.notes += f" | + {cashback_amount} руб. кэшбэк"
+            else:
+                client.notes += f" | Баланс кэшбэка: {cashback_amount} руб."
+                
     await db.commit()
     return {"message": f"Статус заказа изменен на {new_status}"}
