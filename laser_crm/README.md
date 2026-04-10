@@ -65,7 +65,3 @@ docker compose exec web python manage.py createsuperuser
 - **Database**: SQLite (для простоты), можно заменить на PostgreSQL
 - **Deployment**: Docker, Docker Compose
 - **Optional**: Cloudflare Tunnel для HTTPS
-
-## 📝 Лицензия
-
-MIT
