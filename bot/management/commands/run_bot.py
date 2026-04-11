@@ -54,7 +54,7 @@ class Command(BaseCommand):
 
     def handle_message(self, event):
         user_id = event.user_id
-        text = event.text.strip().lower()
+        text = (event.text or '').strip().lower()
         user_info = vk.users.get(user_ids=user_id)[0]
         name = f"{user_info['first_name']} {user_info['last_name']}"
         client = get_or_create_client(user_id, name)
@@ -100,43 +100,103 @@ class Command(BaseCommand):
                 send_vk_message(user_id, "Пожалуйста, выбери услугу из кнопок.")
             elif state == 'awaiting_params':
                 service = data.get('service')
+                if not service:
+                    send_vk_message(user_id, "Ошибка: услуга не найдена. Начните заново с /start")
+                    clear_user_state(user_id)
+                    return
                 params = data.get('params', {})
                 parts = text.split()
-                if service['calc_type'] in ('area_cm2', 'photo_raster'):
-                    if len(parts) >= 2:
-                        params['length'] = float(parts[0])
-                        params['width'] = float(parts[1])
+                calc_type = service['calc_type']
+                
+                try:
+                    if calc_type in ('area_cm2', 'photo_raster'):
+                        if len(parts) >= 2:
+                            params['length'] = float(parts[0])
+                            params['width'] = float(parts[1])
+                        else:
+                            send_vk_message(user_id, "Введи длину и ширину (см) через пробел")
+                            return
+                    elif calc_type == 'meter_thickness':
+                        if len(parts) >= 2:
+                            params['meters'] = float(parts[0])
+                            params['thickness'] = float(parts[1])
+                        else:
+                            send_vk_message(user_id, "Введи метры реза и толщину (мм) через пробел")
+                            return
+                    elif calc_type == 'setup_batch':
+                        if len(parts) >= 3:
+                            params['setup_cost'] = float(parts[0])
+                            params['per_unit_price'] = float(parts[1])
+                            params['quantity'] = float(parts[2])
+                        else:
+                            send_vk_message(user_id, "Введи стоимость настройки, цену за шт и количество")
+                            return
+                    elif calc_type == 'cylindrical':
+                        if len(parts) >= 2:
+                            params['diameter'] = float(parts[0])
+                            params['length'] = float(parts[1])
+                        else:
+                            send_vk_message(user_id, "Введи диаметр (см) и длину (см) через пробел")
+                            return
+                    elif calc_type == 'volume_3d':
+                        if len(parts) >= 2:
+                            params['area'] = float(parts[0])
+                            params['depth'] = float(parts[1])
+                        else:
+                            send_vk_message(user_id, "Введи площадь (см²) и глубину (мм) через пробел")
+                            return
+                    elif calc_type == 'complex':
+                        if len(parts) >= 2:
+                            params['material_cost'] = float(parts[0])
+                            params['cutting_meters'] = float(parts[1])
+                        else:
+                            send_vk_message(user_id, "Введи стоимость материала и метры реза через пробел")
+                            return
+                    elif calc_type == 'per_minute':
+                        if len(parts) >= 1:
+                            params['minutes'] = float(parts[0])
+                        else:
+                            send_vk_message(user_id, "Введи время в минутах")
+                            return
+                    elif calc_type == 'per_char':
+                        if len(parts) >= 1:
+                            params['chars'] = float(parts[0])
+                        else:
+                            send_vk_message(user_id, "Введи количество символов")
+                            return
+                    elif calc_type == 'vector_length':
+                        if len(parts) >= 1:
+                            params['vector_meters'] = float(parts[0])
+                        else:
+                            send_vk_message(user_id, "Введи длину вектора (м)")
+                            return
+                    elif calc_type == 'fixed':
+                        if len(parts) >= 1:
+                            params['quantity'] = float(parts[0])
+                        else:
+                            send_vk_message(user_id, "Введи количество штук")
+                            return
                     else:
-                        send_vk_message(user_id, "Введи длину и ширину (см) через пробел")
-                        return
-                elif service['calc_type'] == 'meter_thickness':
-                    if len(parts) >= 2:
-                        params['meters'] = float(parts[0])
-                        params['thickness'] = float(parts[1])
-                    else:
-                        send_vk_message(user_id, "Введи метры реза и толщину (мм) через пробел")
-                        return
-                elif service['calc_type'] == 'setup_batch':
-                    if len(parts) >= 3:
-                        params['setup_cost'] = float(parts[0])
-                        params['per_unit_price'] = float(parts[1])
-                        params['quantity'] = float(parts[2])
-                    else:
-                        send_vk_message(user_id, "Введи стоимость настройки, цену за шт и количество")
-                        return
-                else:
-                    params['quantity'] = float(parts[0]) if parts else 1
-                data['params'] = params
-                price = calculate_price(service['calc_type'], params, service['base_price'], service['min_price'])
-                data['price'] = price
-                set_user_state(user_id, 'awaiting_confirmation', data)
-                keyboard = get_order_confirmation_keyboard()
-                send_vk_message(user_id, f"💰 Стоимость: {price:.2f}₽\nОформить заказ?", keyboard=keyboard)
+                        params['quantity'] = float(parts[0]) if parts else 1
+                    
+                    data['params'] = params
+                    price = calculate_price(calc_type, params, service['base_price'], service['min_price'])
+                    data['price'] = price
+                    set_user_state(user_id, 'awaiting_confirmation', data)
+                    keyboard = get_order_confirmation_keyboard()
+                    send_vk_message(user_id, f"💰 Стоимость: {price:.2f}₽\nОформить заказ?", keyboard=keyboard)
+                except ValueError:
+                    send_vk_message(user_id, "⚠️ Ошибка: введены неверные данные. Попробуй ещё раз.")
+                    return
             elif state == 'awaiting_confirmation':
+                service = data.get('service')
+                params = data.get('params', {})
+                price = data.get('price')
+                if not service or price is None:
+                    send_vk_message(user_id, "Ошибка: данные заказа потеряны. Начните заново.")
+                    clear_user_state(user_id)
+                    return
                 if 'оформить' in text:
-                    service = data['service']
-                    params = data['params']
-                    price = data['price']
                     order = Order.objects.create(
                         client=client,
                         service_name=service['name'],
@@ -164,10 +224,20 @@ class Command(BaseCommand):
 
     def handle_callback(self, event):
         user_id = event.user_id
-        payload = json.loads(event.payload)
+        try:
+            payload = json.loads(event.payload)
+        except (json.JSONDecodeError, TypeError):
+            send_vk_message(user_id, "⚠️ Ошибка обработки команды. Попробуйте ещё раз.")
+            return
+        
         service_id = payload.get('service_id')
         if service_id:
-            service = PriceListItem.objects.get(id=service_id)
+            try:
+                service = PriceListItem.objects.get(id=service_id)
+            except PriceListItem.DoesNotExist:
+                send_vk_message(user_id, "⚠️ Услуга не найдена. Выберите другую.")
+                return
+            
             set_user_state(user_id, 'awaiting_params', {
                 'service': {
                     'id': service.id,
