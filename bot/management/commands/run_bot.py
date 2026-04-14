@@ -1,14 +1,14 @@
 import logging
 import json
-import re  # ИСПРАВЛЕНО: добавлена библиотека для работы с текстом
+import re
 from django.core.management.base import BaseCommand
 from vk_api.utils import get_random_id
+from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 from bot.vk_client import vk, longpoll
 from vk_api.longpoll import VkEventType
 from bot.models import Client, Order, PriceListItem, Setting, ChatMessage
 from bot.calculator import calculate_price
 from bot.fsm import get_user_state, set_user_state, clear_user_state
-from bot.keyboards import create_inline_keyboard, create_regular_keyboard
 
 logger = logging.getLogger(__name__)
 
@@ -35,15 +35,21 @@ def get_setting(key):
         return None
 
 def get_main_keyboard():
-    buttons = [
-        [{'label': '📋 Каталог', 'color': 'primary'}, {'label': '🧮 Рассчитать', 'color': 'primary'}],
-        [{'label': '💰 Баланс', 'color': 'primary'}, {'label': '📞 Связаться с мастером', 'color': 'secondary'}],
-        [{'label': '❓ Помощь', 'color': 'secondary'}]
-    ]
-    return create_regular_keyboard(buttons, one_time=False)
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button('📋 Каталог', color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button('🧮 Рассчитать', color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button('💰 Баланс', color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button('📞 Связаться с мастером', color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button('❓ Помощь', color=VkKeyboardColor.SECONDARY)
+    return keyboard.get_keyboard()
 
 def get_order_confirmation_keyboard():
-    return create_regular_keyboard([[{'label': '✅ Оформить', 'color': 'positive'}, {'label': '❌ Отмена', 'color': 'negative'}]], one_time=True)
+    keyboard = VkKeyboard(one_time=True)
+    keyboard.add_button('✅ Оформить', color=VkKeyboardColor.POSITIVE)
+    keyboard.add_button('❌ Отмена', color=VkKeyboardColor.NEGATIVE)
+    return keyboard.get_keyboard()
 
 class Command(BaseCommand):
     help = 'Запуск умного помощника VK'
@@ -52,9 +58,7 @@ class Command(BaseCommand):
         logger.info("✅ Умный помощник запущен")
         for event in longpoll.listen():
             try:
-                # ИСПРАВЛЕНО: Безопасная проверка типов событий для сообщений и кнопок
                 event_type_str = getattr(event.type, 'name', str(event.type)).lower()
-                
                 if event.type == VkEventType.MESSAGE_NEW and event.to_me:
                     self.handle_message(event)
                 elif event_type_str == 'message_event':
@@ -65,10 +69,7 @@ class Command(BaseCommand):
     def handle_message(self, event):
         user_id = event.user_id
         original_text = (event.text or '').strip()
-        
-        # Теперь re.sub будет работать отлично
         text = re.sub(r'[^\w\s]', '', original_text).lower().strip()
-        
         client = get_or_create_client(user_id)
 
         vacation_mode = get_setting('vacation_mode')
@@ -79,11 +80,32 @@ class Command(BaseCommand):
 
         ChatMessage.objects.create(client=client, vk_id=user_id, message_text=original_text, is_admin=False)
 
-        if text in ['привет', 'начать']:
-            keyboard = get_main_keyboard()
-            send_vk_message(user_id, f"✨ Привет, {client.name}! Я — умный помощник мастера. Чем могу помочь?", keyboard=keyboard)
+        state, data = get_user_state(user_id)
+
+        # 1. ГЛОБАЛЬНЫЕ КОМАНДЫ (Работают всегда, могут разбудить бота)
+        if text in ['отмена', 'стоп', 'назад', 'выйти', 'меню']:
             clear_user_state(user_id)
-        elif text == 'каталог':
+            send_vk_message(user_id, "Авто-бот снова включен 🤖\nВозврат в главное меню 👇", keyboard=get_main_keyboard())
+            return
+
+        if text in ['привет', 'начать']:
+            clear_user_state(user_id)
+            send_vk_message(user_id, f"✨ Привет, {client.name}! Я — умный помощник мастера. Чем могу помочь?", keyboard=get_main_keyboard())
+            return
+
+        # 2. РЕЖИМ ТИШИНЫ (Бот не мешает общению с мастером)
+        if state == 'waiting_for_master':
+            # Бот ничего не отвечает. Сообщение уже сохранилось в базу. 
+            return
+
+        # 3. ВКЛЮЧЕНИЕ РЕЖИМА ТИШИНЫ
+        if text in ['связаться с мастером', 'мастер', 'человек', 'менеджер']:
+            send_vk_message(user_id, "📞 Переключаю на мастера!\n\nБот переведен в спящий режим, чтобы не мешать вашей беседе. Мастер скоро прочитает сообщения и ответит.\n\n(Чтобы снова включить бота, напишите «отмена»)")
+            set_user_state(user_id, 'waiting_for_master')
+            return
+
+        # 4. ОБРАБОТКА КОМАНД БОТА
+        if text == 'каталог':
             services = PriceListItem.objects.filter(is_active=True)
             if services:
                 reply = "📋 Наши услуги:\n" + "\n".join([f"• {s.name} — {s.base_price}₽/{s.unit}" for s in services])
@@ -95,21 +117,26 @@ class Command(BaseCommand):
             send_vk_message(user_id, f"💰 Твой кэшбэк: {client.cashback_balance:.2f}₽")
             clear_user_state(user_id)
         elif text == 'рассчитать':
-            services = PriceListItem.objects.filter(is_active=True)
+            services = PriceListItem.objects.filter(is_active=True)[:10]
             if not services:
                 send_vk_message(user_id, "Услуги временно не добавлены.")
                 return
-            buttons = [[{'label': s.name, 'payload': {'service_id': s.id}}] for s in services]
-            keyboard = create_inline_keyboard(buttons)
-            send_vk_message(user_id, "Выбери услугу:", keyboard=keyboard)
+            
+            keyboard = VkKeyboard(inline=True)
+            for i, s in enumerate(services):
+                if i > 0 and i % 2 == 0:
+                    keyboard.add_line()
+                keyboard.add_callback_button(
+                    label=s.name[:40],
+                    color=VkKeyboardColor.PRIMARY,
+                    payload=json.dumps({'service_id': s.id})
+                )
+            
+            send_vk_message(user_id, "Выбери услугу (или напиши «отмена»):", keyboard=keyboard.get_keyboard())
             set_user_state(user_id, 'awaiting_service')
-        elif text in ['связаться с мастером', 'мастер']:
-            send_vk_message(user_id, "📞 Напиши свой вопрос, я передам мастеру.\nДля выхода из режима диалога напиши «отмена».")
-            set_user_state(user_id, 'waiting_for_master')
         elif text == 'помощь':
-            send_vk_message(user_id, "❓ Я умею: каталог, рассчитать, баланс, связаться с мастером. Напиши 'привет' для меню.")
+            send_vk_message(user_id, "❓ Я умею: считать цены, показывать каталог и баланс.\n\nЕсли нужен живой человек — нажми «Связаться с мастером».")
         else:
-            state, data = get_user_state(user_id)
             if state == 'awaiting_service':
                 send_vk_message(user_id, "Пожалуйста, выбери услугу из кнопок.")
             elif state == 'awaiting_params':
@@ -119,87 +146,66 @@ class Command(BaseCommand):
                     clear_user_state(user_id)
                     return
                 params = data.get('params', {})
-                
                 parts = text.replace(',', '.').split()
                 calc_type = service['calc_type']
-                
+
                 try:
                     if calc_type in ('area_cm2', 'photo_raster'):
                         if len(parts) >= 2:
-                            params['length'] = float(parts[0])
-                            params['width'] = float(parts[1])
+                            params['length'], params['width'] = float(parts[0]), float(parts[1])
                         else:
                             send_vk_message(user_id, "Введи длину и ширину (см) через пробел")
                             return
                     elif calc_type == 'meter_thickness':
                         if len(parts) >= 2:
-                            params['meters'] = float(parts[0])
-                            params['thickness'] = float(parts[1])
+                            params['meters'], params['thickness'] = float(parts[0]), float(parts[1])
                         else:
                             send_vk_message(user_id, "Введи метры реза и толщину (мм) через пробел")
                             return
                     elif calc_type == 'setup_batch':
                         if len(parts) >= 3:
-                            params['setup_cost'] = float(parts[0])
-                            params['per_unit_price'] = float(parts[1])
-                            params['quantity'] = float(parts[2])
+                            params['setup_cost'], params['per_unit_price'], params['quantity'] = float(parts[0]), float(parts[1]), float(parts[2])
                         else:
                             send_vk_message(user_id, "Введи стоимость настройки, цену за шт и количество")
                             return
                     elif calc_type == 'cylindrical':
                         if len(parts) >= 2:
-                            params['diameter'] = float(parts[0])
-                            params['length'] = float(parts[1])
+                            params['diameter'], params['length'] = float(parts[0]), float(parts[1])
                         else:
                             send_vk_message(user_id, "Введи диаметр (см) и длину (см) через пробел")
                             return
                     elif calc_type == 'volume_3d':
                         if len(parts) >= 2:
-                            params['area'] = float(parts[0])
-                            params['depth'] = float(parts[1])
+                            params['area'], params['depth'] = float(parts[0]), float(parts[1])
                         else:
                             send_vk_message(user_id, "Введи площадь (см²) и глубину (мм) через пробел")
                             return
                     elif calc_type == 'complex':
                         if len(parts) >= 2:
-                            params['material_cost'] = float(parts[0])
-                            params['cutting_meters'] = float(parts[1])
+                            params['material_cost'], params['cutting_meters'] = float(parts[0]), float(parts[1])
                         else:
                             send_vk_message(user_id, "Введи стоимость материала и метры реза через пробел")
                             return
                     elif calc_type == 'per_minute':
-                        if len(parts) >= 1:
-                            params['minutes'] = float(parts[0])
-                        else:
-                            send_vk_message(user_id, "Введи время в минутах")
-                            return
+                        if len(parts) >= 1: params['minutes'] = float(parts[0])
+                        else: send_vk_message(user_id, "Введи время в минутах"); return
                     elif calc_type == 'per_char':
-                        if len(parts) >= 1:
-                            params['chars'] = float(parts[0])
-                        else:
-                            send_vk_message(user_id, "Введи количество символов")
-                            return
+                        if len(parts) >= 1: params['chars'] = float(parts[0])
+                        else: send_vk_message(user_id, "Введи количество символов"); return
                     elif calc_type == 'vector_length':
-                        if len(parts) >= 1:
-                            params['vector_meters'] = float(parts[0])
-                        else:
-                            send_vk_message(user_id, "Введи длину вектора (м)")
-                            return
+                        if len(parts) >= 1: params['vector_meters'] = float(parts[0])
+                        else: send_vk_message(user_id, "Введи длину вектора (м)"); return
                     elif calc_type == 'fixed':
-                        if len(parts) >= 1:
-                            params['quantity'] = float(parts[0])
-                        else:
-                            send_vk_message(user_id, "Введи количество штук")
-                            return
+                        if len(parts) >= 1: params['quantity'] = float(parts[0])
+                        else: send_vk_message(user_id, "Введи количество штук"); return
                     else:
                         params['quantity'] = float(parts[0]) if parts else 1
-                    
+
                     data['params'] = params
                     price = calculate_price(calc_type, params, service['base_price'], service['min_price'])
                     data['price'] = price
                     set_user_state(user_id, 'awaiting_confirmation', data)
-                    keyboard = get_order_confirmation_keyboard()
-                    send_vk_message(user_id, f"💰 Стоимость: {price:.2f}₽\nОформить заказ?", keyboard=keyboard)
+                    send_vk_message(user_id, f"💰 Стоимость: {price:.2f}₽\nОформить заказ?", keyboard=get_order_confirmation_keyboard())
                 except ValueError:
                     send_vk_message(user_id, "⚠️ Ошибка: используйте только цифры (например: 10 20.5). Попробуй ещё раз.")
                     return
@@ -222,40 +228,30 @@ class Command(BaseCommand):
                     )
                     send_vk_message(user_id, f"✅ Заказ #{order.id} создан! Мастер скоро свяжется.")
                     clear_user_state(user_id)
-                    keyboard = get_main_keyboard()
-                    send_vk_message(user_id, "Что ещё сделать?", keyboard=keyboard)
+                    send_vk_message(user_id, "Что ещё сделать?", keyboard=get_main_keyboard())
                 else:
                     send_vk_message(user_id, "❌ Заказ отменён.")
                     clear_user_state(user_id)
-                    keyboard = get_main_keyboard()
-                    send_vk_message(user_id, "Выбери действие:", keyboard=keyboard)
-            
-            elif state == 'waiting_for_master':
-                if text == 'отмена':
-                    clear_user_state(user_id)
-                    keyboard = get_main_keyboard()
-                    send_vk_message(user_id, "Режим диалога завершен. Чем ещё помочь?", keyboard=keyboard)
-                else:
-                    send_vk_message(user_id, "Сообщение передано мастеру. (Для выхода напиши «отмена»)")
+                    send_vk_message(user_id, "Выбери действие:", keyboard=get_main_keyboard())
             else:
-                keyboard = get_main_keyboard()
+                # Если человек пишет обычный текст без режима общения с мастером
                 send_vk_message(
-                    user_id, 
-                    "🤖 Я — автоматический помощник и понимаю только команды с кнопок.\n\n"
-                    "Но не переживай, я сохранил твое сообщение! Мастер прочитает его и обязательно ответит.\n\n"
-                    "А пока можешь воспользоваться меню 👇", 
-                    keyboard=keyboard
+                    user_id,
+                    "🤖 Я — бот-помощник и понимаю только команды с кнопок.\n\n"
+                    "Если вам нужен живой человек, нажмите кнопку «Связаться с мастером» (или напишите «человек»), и я отключусь, чтобы не мешать.",
+                    keyboard=get_main_keyboard()
                 )
 
     def handle_callback(self, event):
         user_id = event.user_id
         
+        # Если клиент нажал инлайн кнопку, значит он снова хочет общаться с ботом. Будим его.
+        state, _ = get_user_state(user_id)
+        if state == 'waiting_for_master':
+            clear_user_state(user_id)
+            
         try:
-            vk.messages.sendMessageEventAnswer(
-                event_id=event.event_id,
-                user_id=user_id,
-                peer_id=event.peer_id
-            )
+            vk.messages.sendMessageEventAnswer(event_id=event.event_id, user_id=user_id, peer_id=event.peer_id)
         except Exception as e:
             logger.error(f"Не удалось отправить ответ на callback: {e}")
 
@@ -264,7 +260,7 @@ class Command(BaseCommand):
         except (json.JSONDecodeError, TypeError):
             send_vk_message(user_id, "⚠️ Ошибка обработки команды. Попробуйте ещё раз.")
             return
-        
+
         service_id = payload.get('service_id')
         if service_id:
             try:
@@ -272,7 +268,7 @@ class Command(BaseCommand):
             except PriceListItem.DoesNotExist:
                 send_vk_message(user_id, "⚠️ Услуга не найдена. Выберите другую.")
                 return
-            
+
             set_user_state(user_id, 'awaiting_params', {
                 'service': {
                     'id': service.id,
