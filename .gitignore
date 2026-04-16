@@ -1,4 +1,14 @@
-```python
+# Скрытые файлы
+.env
+__pycache__/
+*.pyc
+
+# Виртуальное окружение
+venv/
+env/
+
+# Данные (не добавляем БД и медиафайлы в код)
+data/```python
 # Python
 __pycache__/
 *.py[cod]
