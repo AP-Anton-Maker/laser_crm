@@ -58,10 +58,19 @@ TEMPLATES = [
 
 # БАЗА ДАННЫХ (SQLite идеален для соло-проекта и Raspberry)
 # Сохраняем строго в папку data/, чтобы не потерять при перезапуске!
+# Оптимизация для NVMe SSD: WAL режим + нормальная синхронизация
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": BASE_DIR / "data" / "db.sqlite3",
+        "OPTIONS": {
+            "init_command": (
+                "PRAGMA journal_mode=WAL; "
+                "PRAGMA synchronous=NORMAL; "
+                "PRAGMA cache_size=10000; "
+                "PRAGMA temp_store=MEMORY;"
+            )
+        }
     }
 }
 
@@ -85,6 +94,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 VK_API_TOKEN = os.getenv('VK_API_TOKEN')
 VK_GROUP_ID = os.getenv('VK_GROUP_ID')
 ADMIN_VK_ID = os.getenv('ADMIN_VK_ID')
+VK_CONFIRMATION_CODE = os.getenv('VK_CONFIRMATION_CODE', '')
 
 # НАСТРОЙКА КРАСИВОЙ АДМИНКИ UNFOLD
 UNFOLD = {
