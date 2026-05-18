@@ -1,16 +1,25 @@
 from django.core.management.base import BaseCommand
-from crm.models.inventory import Material
-
+from crm.models import Material, SystemLog
+from crm.utils.notifications import send_vk_notification
+from django.conf import settings
 
 class Command(BaseCommand):
-    help = 'Проверка запасов материалов'
+    help = 'Проверяет остатки материалов и уведомляет о низком запасе'
 
     def handle(self, *args, **options):
-        low_stock = Material.objects.filter(in_stock__lte=5, is_active=True)
+        low_stock = Material.objects.filter(in_stock__lte=min_stock_level, is_active=True)
         
-        if low_stock.exists():
-            self.stdout.write(self.style.WARNING('⚠️ Материалы с низким запасом:'))
-            for material in low_stock:
-                self.stdout.write(f'  - {material.name}: {material.in_stock} шт. (мин: {material.min_stock_level})')
+        if not low_stock.exists():
+            self.stdout.write(self.style.SUCCESS('Все материалы в достаточном количестве'))
+            return
+        
+        message = "⚠️ Внимание! Заканчиваются материалы:\n"
+        for material in low_stock:
+            message += f"- {material.name}: {material.in_stock} ед. (мин: {material.min_stock_level})\n"
+        
+        admin_id = getattr(settings, 'VK_ADMIN_ID', None)
+        if admin_id:
+            send_vk_notification(admin_id, message)
+            self.stdout.write(self.style.SUCCESS('Уведомление отправлено'))
         else:
-            self.stdout.write(self.style.SUCCESS('✓ Все материалы в наличии'))
+            self.stdout.write(self.style.WARNING('VK_ADMIN_ID не настроен'))

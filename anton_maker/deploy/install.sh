@@ -1,58 +1,61 @@
 #!/bin/bash
 set -e
 
-echo "🚀 Установка Anton Maker CRM..."
+echo "🚀 Начало установки Anton Maker CRM..."
 
-# Обновление системы
+# 1. Системные зависимости
+echo "📦 Установка системных пакетов..."
 apt update
-apt install -y python3-venv python3-pip nginx libpango-1.0-0 libharfbuzz0b libffi-dev libjpeg-dev zlib1g-dev
+apt install -y python3-pip python3-venv nginx libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf2.0-0 libffi-dev shared-mime-info
 
-# Создание виртуального окружения
-cd /opt/anton_maker
-python3 -m venv venv
-source venv/bin/activate
+# 2. Создание виртуального окружения
+PROJECT_DIR="/opt/anton_maker"
+VENV_DIR="$PROJECT_DIR/venv"
 
-# Установка зависимостей Python
+if [ ! -d "$VENV_DIR" ]; then
+    echo "🐍 Создание виртуального окружения..."
+    python3 -m venv "$VENV_DIR"
+fi
+
+# 3. Установка Python зависимостей
+echo "⬇️ Установка Python пакетов..."
+source "$VENV_DIR/bin/activate"
 pip install --upgrade pip
-pip install -r requirements.txt
+pip install -r "$PROJECT_DIR/requirements.txt"
 
-# Создание директорий
+# 4. Настройка прав доступа
+echo "🔐 Настройка прав доступа..."
+usermod -a -G www-data $USER
+chown -R www-data:www-data "$PROJECT_DIR/data"
+chmod -R 755 "$PROJECT_DIR/data"
+
+# Создание директории для сокета
 mkdir -p /run/anton
-mkdir -p data/media data/static
+chown www-data:www-data /run/anton
 
-# Настройка прав
-chown -R www-data:www-data /opt/anton_maker/data
-chmod -R 755 /opt/anton_maker/data
-
-# Применение миграций
-python manage.py migrate
-
-# Сбор статики
-python manage.py collectstatic --noinput
-
-# Создание суперпользователя (интерактивно)
-echo ""
-echo "👤 Создайте суперпользователя:"
-python manage.py createsuperuser
-
-# Копирование конфигов
-cp deploy/anton-maker.service /etc/systemd/system/
-cp deploy/nginx.conf /etc/nginx/sites-available/anton-maker
-ln -sf /etc/nginx/sites-available/anton-maker /etc/nginx/sites-enabled/
-rm -f /etc/nginx/sites-enabled/default
-
-# Перезапуск сервисов
+# 5. Настройка Systemd
+echo "⚙️ Настройка systemd сервиса..."
+cp "$PROJECT_DIR/deploy/anton-maker.service" /etc/systemd/system/anton-maker.service
 systemctl daemon-reload
 systemctl enable anton-maker
-systemctl start anton-maker
+
+# 6. Настройка Nginx
+echo "🌐 Настройка Nginx..."
+rm -f /etc/nginx/sites-enabled/default
+ln -sf "$PROJECT_DIR/deploy/nginx.conf" /etc/nginx/sites-available/anton-maker
+ln -sf /etc/nginx/sites-available/anton-maker /etc/nginx/sites-enabled/anton-maker
+nginx -t
 systemctl restart nginx
 
-echo ""
+# 7. Миграции и статика
+echo "🗄️ Применение миграций и сбор статики..."
+python3 manage.py migrate --noinput
+python3 manage.py collectstatic --noinput
+
+# 8. Запуск сервиса
+echo "▶️ Запуск сервиса..."
+systemctl start anton-maker
+
 echo "✅ Установка завершена!"
-echo "📝 Админка: https://ваш-домен.ru/secret-admin/"
-echo "🤖 Webhook: https://ваш-домен.ru/bot/webhook/"
-echo ""
-echo "Не забудьте:"
-echo "1. Настроить .env файл"
-echo "2. Получить SSL сертификат через certbot"
-echo "3. Настроить webhook ВКонтакте"
+echo "Не забудьте создать суперпользователя: python3 manage.py createsuperuser"
+echo "И настроить переменные окружения в .env"
