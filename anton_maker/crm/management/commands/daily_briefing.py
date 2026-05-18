@@ -1,29 +1,25 @@
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from datetime import timedelta
-from crm.models.order import Order
-from crm.models.inventory import Material
-
+from crm.models import Order, SystemLog
+from crm.utils.notifications import send_vk_notification
+from django.conf import settings
 
 class Command(BaseCommand):
-    help = 'Ежедневная сводка по заказам и запасам'
+    help = 'Отправляет ежедневную сводку по заказам администратору'
 
     def handle(self, *args, **options):
-        today = timezone.now().date()
-        yesterday = today - timedelta(days=1)
+        yesterday = timezone.now().date() - timedelta(days=1)
+        orders_count = Order.objects.filter(created_at__date=yesterday).count()
+        done_count = Order.objects.filter(completed_at__date=yesterday, status='DONE').count()
         
-        new_orders = Order.objects.filter(created_at__date=today).count()
-        done_orders = Order.objects.filter(status='DONE', completed_at__date=today).count()
+        message = f"📊 Ежедневная сводка за {yesterday.strftime('%d.%m.%Y')}:\n"
+        message += f"Новых заказов: {orders_count}\n"
+        message += f"Выполнено: {done_count}"
         
-        low_stock = Material.objects.filter(in_stock__lte=5, is_active=True)
-        
-        self.stdout.write(f'📊 Ежедневная сводка ({today}):')
-        self.stdout.write(f'  Новых заказов: {new_orders}')
-        self.stdout.write(f'  Выполнено: {done_orders}')
-        
-        if low_stock.exists():
-            self.stdout.write('\n⚠️ Материалы с низким запасом:')
-            for material in low_stock:
-                self.stdout.write(f'  - {material.name}: {material.in_stock} шт.')
+        admin_id = getattr(settings, 'VK_ADMIN_ID', None)
+        if admin_id:
+            send_vk_notification(admin_id, message)
+            self.stdout.write(self.style.SUCCESS('Сводка отправлена'))
         else:
-            self.stdout.write('\n✓ Запасы в норме')
+            self.stdout.write(self.style.WARNING('VK_ADMIN_ID не настроен'))

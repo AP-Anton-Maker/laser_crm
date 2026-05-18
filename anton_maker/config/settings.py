@@ -1,5 +1,5 @@
-import os
 from pathlib import Path
+import os
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -7,15 +7,9 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / 'data'
 
-SECRET_KEY = os.getenv('SECRET_KEY', 'dev-key-change-in-production')
-DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
-
-VK_TOKEN = os.getenv('VK_TOKEN', '')
-VK_CONFIRMATION_CODE = os.getenv('VK_CONFIRMATION_CODE', '')
-VK_SECRET_KEY = os.getenv('VK_SECRET_KEY', '')
-VK_ADMIN_ID = os.getenv('VK_ADMIN_ID', '')
-SITE_URL = os.getenv('SITE_URL', '')
+SECRET_KEY = os.environ.get('SECRET_KEY')
+DEBUG = os.environ.get('DEBUG', 'False').lower() == 'true'
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '').split(',')
 
 INSTALLED_APPS = [
     'unfold',
@@ -25,7 +19,6 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'axes',
     'crm',
 ]
 
@@ -84,38 +77,28 @@ USE_TZ = True
 
 STATIC_URL = '/static/'
 STATIC_ROOT = DATA_DIR / 'static'
+
 MEDIA_URL = '/media/'
 MEDIA_ROOT = DATA_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-UNFOLD = {
-    'SITE_TITLE': 'Anton Maker CRM',
-    'SITE_HEADER': 'Anton Maker',
-    'COLORS': {
-        'primary': {
-            50: '#f0f9ff',
-            100: '#e0f2fe',
-            200: '#bae6fd',
-            300: '#7dd3fc',
-            400: '#38bdf8',
-            500: '#0ea5e9',
-            600: '#0284c7',
-            700: '#0369a1',
-            800: '#075985',
-            900: '#0c4a6e',
-            950: '#082f49',
-        },
-    },
-}
+VK_TOKEN = os.environ.get('VK_TOKEN')
+VK_SECRET_KEY = os.environ.get('VK_SECRET_KEY')
+VK_CONFIRMATION_CODE = os.environ.get('VK_CONFIRMATION_CODE')
+VK_ADMIN_ID = os.environ.get('VK_ADMIN_ID')
 
+SECURE_BROWSER_XSS_FILTER = not DEBUG
+SECURE_CONTENT_TYPE_NOSNIFF = not DEBUG
+X_FRAME_OPTIONS = 'DENY' if not DEBUG else 'SAMEORIGIN'
+SECURE_SSL_REDIRECT = not DEBUG
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+SECURE_HSTS_SECONDS = 31536000 if not DEBUG else 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
+SECURE_HSTS_PRELOAD = not DEBUG
+
+AXES_ENABLED = not DEBUG
 AXES_FAILURE_LIMIT = 5
 AXES_COOLOFF_TIME = 1
-AXES_HANDLER = 'axes.handlers.database.AxesDatabaseHandler'
-
-if not DEBUG:
-    SECURE_BROWSER_XSS_FILTER = True
-    SECURE_CONTENT_TYPE_NOSNIFF = True
-    X_FRAME_OPTIONS = 'DENY'
-    CSRF_COOKIE_SECURE = True
-    SESSION_COOKIE_SECURE = True
+AXES_LOCK_OUT_BY_COMBINATION_USER_AND_IP = True

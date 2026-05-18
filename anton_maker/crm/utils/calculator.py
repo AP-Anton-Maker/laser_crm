@@ -1,26 +1,20 @@
-from decimal import Decimal
+from decimal import Decimal, ROUND_UP
 
+MIN_ORDER_PRICE = Decimal('300.00')
+LASER_WEAR_SURCHARGE = Decimal('1.05')  # 5% на износ
 
-def calculate_price(length_mm, price_per_unit, min_order=500, markup=1.2):
-    """
-    Расчет стоимости заказа.
+def calculate_order_cost(length_cm: float, price_per_unit: float, material_type: str = 'standard') -> Decimal:
+    length = Decimal(str(length_cm))
+    unit_price = Decimal(str(price_per_unit))
     
-    Args:
-        length_mm: Длина реза в мм
-        price_per_unit: Цена за единицу (мм)
-        min_order: Минимальная стоимость заказа
-        markup: Наценка
+    base_cost = length * unit_price
     
-    Returns:
-        Decimal: Итоговая стоимость
-    """
-    if not isinstance(price_per_unit, Decimal):
-        price_per_unit = Decimal(str(price_per_unit))
+    if material_type == 'premium':
+        base_cost *= Decimal('1.20')
+        
+    base_cost *= LASER_WEAR_SURCHARGE
     
-    base_price = Decimal(str(length_mm)) * price_per_unit
-    total = base_price * Decimal(str(markup))
-    
-    if total < Decimal(str(min_order)):
-        total = Decimal(str(min_order))
-    
-    return total.quantize(Decimal('0.01'))
+    if base_cost < MIN_ORDER_PRICE:
+        return MIN_ORDER_PRICE
+        
+    return base_cost.quantize(Decimal('1'), rounding=ROUND_UP)

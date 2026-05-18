@@ -1,11 +1,8 @@
-# Crontab example for Anton Maker CRM
-# Edit with: crontab -e
-
-# Daily backup at 3:00 AM
+# Ежедневный бэкап в 3:00 ночи
 0 3 * * * /opt/anton_maker/deploy/backup.sh >> /var/log/anton_backup.log 2>&1
 
-# Daily briefing at 9:00 AM (Monday-Friday)
-0 9 * * 1-5 cd /opt/anton_maker && ./venv/bin/python manage.py daily_briefing >> /var/log/anton_briefing.log 2>&1
+# Ежедневная сводка в 9:00 утра
+0 9 * * * cd /opt/anton_maker && /opt/anton_maker/venv/bin/python manage.py daily_briefing >> /var/log/anton_briefing.log 2>&1
 
-# Stock check every 6 hours
-0 */6 * * * cd /opt/anton_maker && ./venv/bin/python manage.py check_stock >> /var/log/anton_stock.log 2>&1
+# Проверка запасов каждое утро в 8:00
+0 8 * * * cd /opt/anton_maker && /opt/anton_maker/venv/bin/python manage.py check_stock >> /var/log/anton_stock.log 2>&1

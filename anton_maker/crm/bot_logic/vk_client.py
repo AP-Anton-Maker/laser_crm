@@ -1,36 +1,42 @@
-import vk_api
-from vk_api.vk_api import VkUpload
-from django.conf import settings
 import requests
 import os
-
+from django.conf import settings
+from pathlib import Path
 
 class VKClient:
     def __init__(self):
-        self.vk = vk_api.VkApi(token=settings.VK_TOKEN)
-        self.api = self.vk.get_api()
+        self.token = settings.VK_TOKEN
+        self.api_version = '5.131'
+        self.base_url = 'https://api.vk.com/method'
+
+    def _request(self, method, params=None):
+        if params is None:
+            params = {}
+        params['access_token'] = self.token
+        params['v'] = self.api_version
+        response = requests.post(f"{self.base_url}/{method}", data=params)
+        return response.json()
 
     def send_message(self, user_id, text, keyboard=None):
-        message_data = {
+        params = {
             'user_id': user_id,
             'message': text,
-            'random_id': 0,
+            'random_id': 0
         }
         if keyboard:
-            message_data['keyboard'] = keyboard
-        self.api.messages.send(**message_data)
+            params['keyboard'] = keyboard
+            
+        return self._request('messages.send', params)
 
     def download_file(self, url, filename):
-        media_root = settings.MEDIA_ROOT
-        layouts_dir = os.path.join(media_root, 'layouts')
-        os.makedirs(layouts_dir, exist_ok=True)
+        save_path = settings.MEDIA_ROOT / 'layouts'
+        save_path.mkdir(parents=True, exist_ok=True)
+        full_path = save_path / filename
         
-        filepath = os.path.join(layouts_dir, filename)
         response = requests.get(url, stream=True)
-        response.raise_for_status()
-        
-        with open(filepath, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-        
-        return filepath
+        if response.status_code == 200:
+            with open(full_path, 'wb') as f:
+                for chunk in response.iter_content(1024):
+                    f.write(chunk)
+            return str(full_path.relative_to(settings.MEDIA_ROOT))
+        return None
